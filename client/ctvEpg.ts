@@ -14,7 +14,8 @@
  * ⚠️ `channelKey` doit rester identique à `chanKey` de src/merge.mjs (même normalisation des deux côtés).
  */
 
-export const EPG_BASE = 'https://raw.githubusercontent.com/AGENCE-BUZZLE/epg/data';
+/** GitHub Pages (CDN) d'abord, la branche brute en secours : mêmes fichiers */
+export const EPG_BASES = ['https://agence-buzzle.github.io/epg', 'https://raw.githubusercontent.com/AGENCE-BUZZLE/epg/data'];
 
 export type Programme = {
   s: number; // début (ms UTC)
@@ -94,10 +95,10 @@ export function cleanProviderName(raw: string): string {
 
 // ── client ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-type Opts = { base?: string; country?: string; fetchImpl?: typeof fetch; now?: () => number };
+type Opts = { bases?: string[]; country?: string; fetchImpl?: typeof fetch; now?: () => number };
 
 export class CtvEpg {
-  private base: string;
+  private bases: string[];
   private country: string;
   private fetchImpl: typeof fetch;
   private clock: () => number;
@@ -110,7 +111,7 @@ export class CtvEpg {
   private sportCache?: { at: number; events: SportEvent[] };
 
   constructor(opts: Opts = {}) {
-    this.base = (opts.base || EPG_BASE).replace(/\/+$/, '');
+    this.bases = (opts.bases || EPG_BASES).map((b) => b.replace(/\/+$/, ''));
     this.country = opts.country || 'fr';
     this.fetchImpl = opts.fetchImpl || ((...a: Parameters<typeof fetch>) => fetch(...a));
     this.clock = opts.now || (() => Date.now());
@@ -122,8 +123,19 @@ export class CtvEpg {
   }
 
   private async get<T>(path: string): Promise<T> {
-    const r = await this.fetchImpl(`${this.base}/${path}`);
-    if (!r.ok) throw new Error(`guide ${path} : HTTP ${r.status}`);
+    let r: Response | undefined;
+    let err: unknown;
+    for (const base of this.bases) {
+      try {
+        r = await this.fetchImpl(`${base}/${path}`);
+        if (r.ok) break;
+        err = new Error(`guide ${path} : HTTP ${r.status}`);
+      } catch (e) {
+        err = e;
+      }
+      r = undefined;
+    }
+    if (!r) throw err;
     const date = Date.parse(r.headers.get('date') || '');
     // n'a de sens que si l'écart dépasse la précision de l'en-tête (1 s) et le temps de la requête
     if (Number.isFinite(date)) {

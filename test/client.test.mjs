@@ -23,7 +23,7 @@ test('le client et le serveur calculent la même clé', () => {
 /** faux serveur : sert les fichiers donnés, avec un en-tête Date réglable */
 function fakeFetch(files, serverNow) {
   return async (url) => {
-    const path = url.replace(/^.*\/data\//, '');
+    const path = url.replace(/^https:\/\/[^/]+\/(epg\/|AGENCE-BUZZLE\/epg\/data\/)/, '');
     if (!(path in files)) return new Response('', { status: 404, headers: { date: new Date(serverNow()).toUTCString() } });
     return new Response(JSON.stringify(files[path]), { headers: { 'content-type': 'application/json', date: new Date(serverNow()).toUTCString() } });
   };

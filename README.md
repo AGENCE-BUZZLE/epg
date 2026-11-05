@@ -3,8 +3,8 @@
 Guide des programmes TV gratuit, fusionné à partir de plusieurs sources ouvertes, regénéré toutes les 3 heures par
 GitHub Actions et publié en fichiers statiques dans la branche `data` de ce dépôt. Aucun serveur, aucun abonnement.
 
-Adresse de base : `https://raw.githubusercontent.com/AGENCE-BUZZLE/epg/data/` (par exemple
-`…/data/fr/now.json`). La branche `data` ne garde que la dernière génération (un seul commit, remplacé à chaque fois).
+Adresse de base : **`https://agence-buzzle.github.io/epg/`** (GitHub Pages, servi depuis la branche `data`), en secours
+`https://raw.githubusercontent.com/AGENCE-BUZZLE/epg/data/` (mêmes fichiers). La branche `data` ne garde que la dernière génération (un seul commit, remplacé à chaque fois).
 Le tableau de bord est `index.html` de cette branche.
 
 ## Ce que fait la génération
