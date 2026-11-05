@@ -10,9 +10,15 @@ const QUALITY = new Set(['hd', 'fhd', 'uhd', '4k', 'sd', 'hevc', 'h265', 'h264',
 export function chanKey(raw, isId = false) {
   let s = String(raw || '');
   if (isId) s = s.replace(/\.[a-z]{2,3}$/i, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/\./g, ' ');
+  // préfixe de langue ajouté par certaines sources (« ar: MBC 1 », « en: … »)
+  s = s.replace(/^\s*[a-z]{2,3}\s*:\s*/i, '');
   const w = words(s);
-  const kept = w.filter((x) => !QUALITY.has(x));
-  return (kept.length ? kept : w).join('');
+  let kept = w.filter((x) => !QUALITY.has(x));
+  // « One TV » ne doit pas devenir « one » (collision avec « ON E ») : « tv » n'est retiré que si la clé reste longue
+  if (kept.join('').length < 4) kept = w.filter((x) => x === 'tv' || !QUALITY.has(x));
+  const key = (kept.length ? kept : w).join('');
+  // une clé sans aucune lettre (« 1 ») relierait des chaînes sans rapport
+  return /\p{L}/u.test(key) ? key : '';
 }
 
 /** identifiant au format XMLTV/iptv-org (« TF1.fr », « France.3.Corse.fr ») ou opaque (« FRBC4300004F2 ») */
@@ -23,7 +29,9 @@ const readableId = (id) => /^[A-Za-z0-9+&'_-]+(\.[A-Za-z0-9+&'_-]+)*\.[a-z]{2}$/
  * @param {{ code: string, onlyKnown?: boolean, channels: Map }[]} parsed sources dans l'ordre de priorité
  * @returns {{ groups: object[], bySourceChannel: Map<string, object> }}
  */
-export function groupChannels(parsed) {
+export function groupChannels(parsed, cc = 'fr') {
+  const local = new RegExp(`\\.${cc}$`, 'i');
+  const localName = cc === 'fr' ? /\bfr(ance)?\b/i : /$^/;
   const keyToGroup = new Map();
   const groups = [];
   const bySourceChannel = new Map();
@@ -39,7 +47,7 @@ export function groupChannels(parsed) {
         break;
       }
       if (!g) {
-        if (src.onlyKnown && !/\.fr$/i.test(ch.id) && !ch.names.some((n) => /\bfr(ance)?\b/i.test(n))) continue;
+        if (src.onlyKnown && !local.test(ch.id) && !ch.names.some((n) => localName.test(n))) continue;
         g = {
           id: readableId(ch.id) ? ch.id : `${src.code}.${ch.id}`,
           name: ch.names[0],

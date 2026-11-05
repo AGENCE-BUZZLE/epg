@@ -18,6 +18,16 @@ test('clé de chaîne : variantes HD, identifiants XMLTV, « + »', () => {
   assert.notEqual(chanKey('Canal+'), chanKey('Canal+ Sport'));
 });
 
+test('clé de chaîne : tous les alphabets, jamais une clé faite seulement de chiffres', () => {
+  assert.equal(chanKey('ar: 1 أبوظبي الرياضية'), chanKey('1 أبوظبي الرياضية'));
+  assert.notEqual(chanKey('ar: 1 أبوظبي الرياضية'), chanKey('ar: السعودية 1'));
+  assert.equal(chanKey('Россия 1'), 'россия1');
+  assert.equal(chanKey('CCTV-1 综合'), 'cctv1综合');
+  assert.equal(chanKey('1'), '');
+  assert.equal(chanKey('ar: 1'), '');
+  assert.notEqual(chanKey('One TV'), chanKey('ON E HD'));
+});
+
 test('regroupement des chaînes entre sources', () => {
   const a = { code: 'a', channels: new Map([['TF1.fr', { id: 'TF1.fr', names: ['TF1'] }], ['M6.fr', { id: 'M6.fr', names: ['M6'] }]]) };
   const b = { code: 'b', channels: new Map([['x1', { id: 'x1', names: ['TF1 HD'] }], ['x2', { id: 'x2', names: ['Gulli'] }]]) };

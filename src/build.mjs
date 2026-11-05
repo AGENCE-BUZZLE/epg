@@ -78,7 +78,7 @@ async function buildCountry(cc) {
   parsed.sort((a, b) => order.indexOf(a.code) - order.indexOf(b.code));
   report.sources.sort((a, b) => order.indexOf(a.code) - order.indexOf(b.code));
 
-  const { groups, bySourceChannel, keyToGroup } = groupChannels(parsed);
+  const { groups, bySourceChannel, keyToGroup } = groupChannels(parsed, cc);
   // programmes rangés par chaîne et par source
   const lists = new Map();
   for (const src of parsed) {

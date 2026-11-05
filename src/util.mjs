@@ -39,8 +39,8 @@ export function fold(s) {
     .replace(/&/g, ' and ');
 }
 
-/** mots significatifs (lettres et chiffres) */
-export const words = (s) => fold(s).split(/[^a-z0-9]+/).filter(Boolean);
+/** mots significatifs : lettres de tous les alphabets (latin, arabe, cyrillique, chinois…), signes et chiffres */
+export const words = (s) => fold(s).split(/[^\p{L}\p{M}\p{N}]+/u).filter(Boolean);
 
 /** distance d'édition (pour « Olympiakos » / « Olympiacos ») */
 export function lev(a, b) {
