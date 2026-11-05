@@ -26,8 +26,11 @@ jobs:
           node-version: 22
       - name: Tests (heures, changements d'heure, fusion, sport)
         run: node --test test/*.test.mjs
+      # génération précédente : son passé garde 7 jours d'historique pour le replay (les sources ne remontent qu'à la veille)
+      - name: Génération précédente
+        run: git clone -q --depth 1 -b data "https://github.com/${GITHUB_REPOSITORY}.git" prev || mkdir -p prev
       - name: Génération du guide
-        run: node src/build.mjs --out dist
+        run: node src/build.mjs --out dist --prev prev
       # Publication : la branche « data » ne contient que la dernière génération (un seul commit, remplacé à chaque
       # fois, pour que le dépôt ne grossisse pas). Fichiers lisibles sur
       # https://raw.githubusercontent.com/AGENCE-BUZZLE/epg/data/<fichier> (et sur GitHub Pages si activé sur cette branche).

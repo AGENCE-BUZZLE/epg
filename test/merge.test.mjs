@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chanKey, clean, detectOffset, groupChannels, mergeChannel } from '../src/merge.mjs';
+import { chanKey, clean, detectOffset, groupChannels, mergeChannel, keepPast } from '../src/merge.mjs';
 import { parseXmltv, parseEpisode } from '../src/xmltv.mjs';
 
 const H = 3600_000;
@@ -107,4 +107,13 @@ test('regroupement : la chaîne du pays du guide garde le nom commun même si el
   assert.equal(r.groups.length, 2);
   assert.equal(r.keyToGroup.get('rtl').id, 'RTL.fr');
   assert.equal(r.keyToGroup.get('rtl@be').id, 'RTL.be');
+});
+
+test('historique du replay : le passé de la génération précédente est gardé 7 jours, sans doublon', () => {
+  const now = T + 10 * 24 * H;
+  const prev = [prog(-1, 1, 'trop vieux'), prog(5 * 24, 1, 'il y a 5 j'), prog(9 * 24, 1, 'hier'), prog(10 * 24 - 2, 1, 'déjà dans la nouvelle')];
+  const fresh = [prog(10 * 24 - 2, 1, 'déjà dans la nouvelle'), prog(10 * 24, 1, 'maintenant')];
+  const out = keepPast(prev, fresh, now, 7);
+  assert.deepEqual(out.map((p) => p.t), ['il y a 5 j', 'hier', 'déjà dans la nouvelle', 'maintenant']);
+  assert.deepEqual(keepPast(undefined, fresh, now), fresh);
 });

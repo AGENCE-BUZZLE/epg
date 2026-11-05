@@ -216,3 +216,17 @@ export function mergeChannel(lists, now = Date.now()) {
 }
 
 export { fold };
+
+/**
+ * Historique pour le replay (05/11/2026) : les sources ne remontent qu'à la veille. On garde les programmes passés de la
+ * génération précédente (fichier de la chaîne publié) qui précèdent le premier programme frais, sur `days` jours.
+ * @param {{ s: number, e: number }[]} prev programmes publiés la fois d'avant (format du fichier de chaîne)
+ * @param {{ s: number, e: number }[]} fresh programmes de cette génération, triés
+ */
+export function keepPast(prev, fresh, now = Date.now(), days = 7) {
+  if (!Array.isArray(prev) || !prev.length) return fresh;
+  const first = fresh.length ? fresh[0].s : Infinity;
+  const from = now - days * 24 * 3600_000;
+  const past = prev.filter((p) => p && typeof p.s === 'number' && typeof p.e === 'number' && p.e > from && p.e <= first && p.s < first);
+  return past.length ? [...past.sort((a, b) => a.s - b.s), ...fresh] : fresh;
+}

@@ -1,13 +1,13 @@
 // Construit le guide : télécharge toutes les sources, vérifie leur fraîcheur, relie les chaînes, fusionne, ajoute le
 // sport, puis écrit les fichiers statiques dans le dossier de sortie (publié tel quel sur GitHub Pages).
-//   node src/build.mjs --out dist [--country fr] [--no-sport]
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+//   node src/build.mjs --out dist [--country fr] [--no-sport] [--prev <dossier de la génération précédente>]
+import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import { SOURCES } from './sources.mjs';
 import { fetchText, safeId, pool } from './util.mjs';
 import { parseXmltv } from './xmltv.mjs';
-import { chanKey, groupChannels, mergeChannel } from './merge.mjs';
+import { chanKey, groupChannels, mergeChannel, keepPast } from './merge.mjs';
 import { fetchEspn, fetchF1, buildSport, isSportBroadcast } from './sport.mjs';
 import { toXmltv } from './export.mjs';
 
@@ -17,6 +17,8 @@ const opt = (name, def) => {
   return i >= 0 ? args[i + 1] : def;
 };
 const OUT = opt('out', 'dist');
+// génération précédente (branche data) : son passé complète l'historique pour le replay (7 jours)
+const PREV = opt('prev', '');
 const COUNTRIES = (opt('country', Object.keys(SOURCES).join(','))).split(',');
 const WITH_SPORT = !args.includes('--no-sport');
 const NOW = Date.now();
@@ -121,7 +123,15 @@ async function buildCountry(cc) {
       programmes: progs.length,
       to: progs[progs.length - 1].e,
     });
-    write(file, { id: g.id, name: g.name, logo: g.logo, generatedAt: NOW, programmes: progs.map(full) });
+    let out = progs.map(full);
+    if (PREV && existsSync(join(PREV, file))) {
+      try {
+        out = keepPast(JSON.parse(readFileSync(join(PREV, file), 'utf8')).programmes, out, NOW);
+      } catch {
+        // fichier précédent illisible : on publie la génération seule
+      }
+    }
+    write(file, { id: g.id, name: g.name, logo: g.logo, generatedAt: NOW, programmes: out });
     // fenêtre courte : en cours et suivants jusqu'à la génération d'après (toutes les 3 h) avec de la marge
     nowFile[g.id] = progs.filter((p) => p.e > NOW - H && p.s < NOW + 9 * H).map(short);
     progCount += progs.length;
