@@ -24,6 +24,10 @@ export function chanKey(raw, isId = false) {
 /** identifiant au format XMLTV/iptv-org (« TF1.fr », « France.3.Corse.fr ») ou opaque (« FRBC4300004F2 ») */
 const readableId = (id) => /^[A-Za-z0-9+&'_-]+(\.[A-Za-z0-9+&'_-]+)*\.[a-z]{2}$/.test(id) && !/\d{5,}/.test(id);
 
+const ccOf = (id) => (readableId(id) ? id.slice(id.lastIndexOf('.') + 1).toLowerCase() : '');
+/** deux identifiants lisibles de pays différents (« Arte.fr » et « Arte.be ») */
+const otherCountry = (a, b) => !!ccOf(a) && !!ccOf(b) && ccOf(a) !== ccOf(b);
+
 /**
  * Regroupe les chaînes de toutes les sources : même clé (par l'identifiant ou par un nom) = même chaîne.
  * @param {{ code: string, onlyKnown?: boolean, channels: Map }[]} parsed sources dans l'ordre de priorité
@@ -38,13 +42,24 @@ export function groupChannels(parsed, cc = 'fr') {
   for (const src of parsed) {
     for (const ch of src.channels.values()) {
       const keys = new Set();
-      if (readableId(ch.id)) keys.add(chanKey(ch.id, true));
+      // identifiant d'un autre pays (« Arte.be » dans le guide France) : sa clé garde le pays, sinon « arte » de Belgique
+      // prenait la place d'Arte France (05/11/2026)
+      if (readableId(ch.id)) {
+        const k = chanKey(ch.id, true);
+        const cc2 = ch.id.slice(ch.id.lastIndexOf('.') + 1).toLowerCase();
+        if (k && !local.test(ch.id)) keys.add(`${k}@${cc2}`);
+        keys.add(k);
+      }
       for (const n of ch.names) keys.add(chanKey(n));
       for (const k of [...keys]) if (k.length < 2) keys.delete(k);
       let g = null;
-      for (const k of keys) if (keyToGroup.has(k)) {
-        g = keyToGroup.get(k);
-        break;
+      for (const k of keys) {
+        const cand = keyToGroup.get(k);
+        // une même source qui donne deux pays différents (« Arte.fr », « Arte.be ») : deux chaînes distinctes
+        if (cand && !cand.members.some((m) => m.src === src.code && otherCountry(m.id, ch.id))) {
+          g = cand;
+          break;
+        }
       }
       if (!g) {
         if (src.onlyKnown && !local.test(ch.id) && !ch.names.some((n) => localName.test(n))) continue;
@@ -64,7 +79,9 @@ export function groupChannels(parsed, cc = 'fr') {
       for (const n of ch.names) g.names.add(n);
       for (const k of keys) {
         g.keys.add(k);
-        if (!keyToGroup.has(k)) keyToGroup.set(k, g);
+        // un nom commun (« rtl ») revient à la chaîne du pays du guide, même si celle d'un autre pays est arrivée avant
+        const had = keyToGroup.get(k);
+        if (!had || (had !== g && local.test(g.id) && !local.test(had.id))) keyToGroup.set(k, g);
       }
       if (!g.logo && ch.icon) g.logo = ch.icon;
     }

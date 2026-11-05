@@ -76,3 +76,35 @@ test('lecture XMLTV : heures, image, épisode, rediffusion, entités', () => {
   assert.equal(p.rerun, 1);
   assert.deepEqual(parseEpisode('<episode-num system="onscreen">S03E07</episode-num>'), { season: 3, episode: 7 });
 });
+
+test('regroupement : une chaîne d’un autre pays ne prend pas la place de la chaîne française (Arte / Arte Belgique)', () => {
+  const a = { code: 'a', channels: new Map([
+    ['Arte.be', { id: 'Arte.be', names: ['Arte Belgique'] }],
+    ['Arte.fr', { id: 'Arte.fr', names: ['Arte'] }],
+  ]) };
+  const b = { code: 'b', channels: new Map([['x9', { id: 'x9', names: ['ARTE HD'] }]]) };
+  const { groups, bySourceChannel, keyToGroup } = groupChannels([a, b], 'fr');
+  assert.equal(groups.length, 2);
+  assert.equal(bySourceChannel.get('a|Arte.fr').id, 'Arte.fr');
+  assert.equal(bySourceChannel.get('a|Arte.be').id, 'Arte.be');
+  assert.equal(bySourceChannel.get('b|x9').id, 'Arte.fr');
+  assert.equal(keyToGroup.get('arte').id, 'Arte.fr');
+  assert.equal(keyToGroup.get('artebelgique').id, 'Arte.be');
+});
+
+test('regroupement : variantes d’une même source (« TF1 », « TF1 HD ») fusionnées, pays différents séparés', () => {
+  const a = { code: 'a', channels: new Map([['p1', { id: 'p1', names: ['Sport 1'] }], ['p2', { id: 'p2', names: ['Sport 1 HD'] }]]) };
+  assert.equal(groupChannels([a], 'fr').groups.length, 1);
+  const b = { code: 'b', channels: new Map([['RTL.fr', { id: 'RTL.fr', names: ['RTL'] }], ['RTL.be', { id: 'RTL.be', names: ['RTL'] }]]) };
+  const r = groupChannels([b], 'fr');
+  assert.equal(r.groups.length, 2);
+  assert.equal(r.keyToGroup.get('rtl').id, 'RTL.fr');
+});
+
+test('regroupement : la chaîne du pays du guide garde le nom commun même si elle arrive après', () => {
+  const b = { code: 'b', channels: new Map([['RTL.be', { id: 'RTL.be', names: ['RTL'] }], ['RTL.fr', { id: 'RTL.fr', names: ['RTL'] }]]) };
+  const r = groupChannels([b], 'fr');
+  assert.equal(r.groups.length, 2);
+  assert.equal(r.keyToGroup.get('rtl').id, 'RTL.fr');
+  assert.equal(r.keyToGroup.get('rtl@be').id, 'RTL.be');
+});
