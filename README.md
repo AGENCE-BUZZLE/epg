@@ -59,6 +59,23 @@ description), `rediffusions`, `announced` (diffuseurs annoncés par ESPN, `dansL
 
 Ajouter une source : une ligne dans `src/sources.mjs`. Ajouter un pays : une nouvelle clé dans `SOURCES`.
 
+## Brancher une app (client prêt à copier)
+
+`client/ctvEpg.ts` : client sans dépendance (React Native iOS/tvOS/Android, Electron, Node).
+
+```ts
+import { CtvEpg } from './ctvEpg';
+const epg = new CtvEpg({ country: 'fr' });
+await epg.load();                                      // alias + « en cours » (à recharger si epg.stale())
+const id = epg.match({ name: 'FR| TF1 FHD ᴿᴬᵂ', epgId }); // → 'TF1.fr', ou undefined (guide du fournisseur en secours)
+const { cur, next } = epg.nowNext(id);                   // à l'heure corrigée (epg.now())
+const progs = await epg.channel(id);                     // ~10 jours
+const matchs = await epg.sport();                        // n'afficher que e.tv, jamais e.announced non vérifié
+```
+
+Mesuré le 05/11/2026 sur 60 noms de chaînes françaises écrits comme chez les fournisseurs IPTV : 56 reliés ;
+les 4 autres sont des chaînes arrêtées ou renommées (C8, NRJ 12, OCS Max, Game One).
+
 ## Développement
 
 ```bash
