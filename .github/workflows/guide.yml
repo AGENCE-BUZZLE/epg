@@ -27,6 +27,7 @@ jobs:
       - name: Tests (heures, changements d'heure, fusion, sport)
         run: node --test test/*.test.mjs
       # génération précédente : son passé garde 7 jours d'historique pour le replay (les sources ne remontent qu'à la veille)
+      # et son cache/images.json.gz évite de resonder les images déjà connues (format horizontal ou vertical)
       - name: Génération précédente
         run: git clone -q --depth 1 -b data "https://github.com/${GITHUB_REPOSITORY}.git" prev || mkdir -p prev
       - name: Génération du guide

@@ -202,15 +202,22 @@ export function mergeChannel(lists, now = Date.now()) {
     }
   }
   const final = clean(merged);
+  const imgsOf = (q) => q.imgs || (q.i ? [q.i] : []);
   for (const p of final) {
+    // toutes les images proposées pour ce programme (source retenue d'abord) : le choix horizontal se fait ensuite
+    // (src/images.mjs) ; `i` garde l'image de l'ancienne règle (première image de la source retenue)
+    const imgs = [...imgsOf(p)];
     for (const l of others) {
       if (l.src === p.src) continue;
       const twin = near(l.progs, p.s, 10 * 60_000).find((q) => sameTitle(p.t, q.t));
       if (!twin) continue;
       p.n++;
+      for (const u of imgsOf(twin)) if (!imgs.includes(u)) imgs.push(u);
       for (const f of FIELDS) if (p[f] === undefined && twin[f] !== undefined) p[f] = twin[f];
       if (twin.d && p.d && twin.d.length > p.d.length * 1.5) p.d = twin.d;
     }
+    if (imgs.length) p.imgs = imgs;
+    else delete p.imgs;
   }
   return { progs: final, primary: base.src, offsets };
 }

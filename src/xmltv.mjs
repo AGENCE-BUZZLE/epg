@@ -49,7 +49,10 @@ export function parseEpisode(body) {
 
 /**
  * Lit un XMLTV complet.
- * @returns {{ channels: Map<string, { id: string, names: string[], icon?: string }>, programmes: object[], noOffset: number }}
+ * Toutes les images d'un programme sont gardées (`imgs`, quand il y en a plusieurs : epgshare01 en donne jusqu'à 4,
+ * affiches verticales et 16:9 mélangées) ; `i` reste la première. `iconRatios` : formats écrits dans le fichier
+ * (attributs width / height).
+ * @returns {{ channels: Map<string, { id: string, names: string[], icon?: string }>, programmes: object[], noOffset: number, iconRatios: Map<string, number> }}
  */
 export function parseXmltv(text) {
   const channels = new Map();
@@ -61,6 +64,7 @@ export function parseXmltv(text) {
     channels.set(id, { id, names: names.length ? names : [id], icon: icon ? unescape(icon[1]) : undefined });
   }
   const programmes = [];
+  const iconRatios = new Map();
   let noOffset = 0;
   for (const m of text.matchAll(/<programme\s+([^>]*)>([\s\S]*?)<\/programme>/g)) {
     const head = m[1];
@@ -70,7 +74,15 @@ export function parseXmltv(text) {
     const b = parseTime(attr(head, 'stop'));
     if (!ch || !Number.isFinite(a.ms) || !Number.isFinite(b.ms) || b.ms <= a.ms) continue;
     if (a.noOffset) noOffset++;
-    const icon = /<icon[^>]*\bsrc="([^"]+)"/.exec(body);
+    const icons = [];
+    for (const im of body.matchAll(/<icon\s[^>]*>/g)) {
+      const src = attr(im[0], 'src');
+      if (!src || icons.includes(src)) continue;
+      icons.push(src);
+      const w = +attr(im[0], 'width');
+      const h = +attr(im[0], 'height');
+      if (w > 0 && h > 0) iconRatios.set(src, Math.round((w / h) * 100) / 100);
+    }
     const rating = /<rating[^>]*>\s*<value>([^<]*)<\/value>/.exec(body);
     const p = {
       ch,
@@ -84,7 +96,8 @@ export function parseXmltv(text) {
     const ep = parseEpisode(body);
     if (st) p.st = st;
     if (d) p.d = d;
-    if (icon) p.i = unescape(icon[1]);
+    if (icons.length) p.i = icons[0];
+    if (icons.length > 1) p.imgs = icons;
     if (cat.length) p.c = cat;
     if (ep) p.ep = ep;
     if (rating) p.r = unescape(rating[1].trim());
@@ -93,5 +106,5 @@ export function parseXmltv(text) {
     if (/<premiere/.test(body)) p.new = 1;
     programmes.push(p);
   }
-  return { channels, programmes, noOffset };
+  return { channels, programmes, noOffset, iconRatios };
 }

@@ -1,6 +1,7 @@
 // Construit le guide : télécharge toutes les sources, vérifie leur fraîcheur, relie les chaînes, fusionne, ajoute le
 // sport, puis écrit les fichiers statiques dans le dossier de sortie (publié tel quel sur GitHub Pages).
 //   node src/build.mjs --out dist [--country fr] [--no-sport] [--prev <dossier de la génération précédente>]
+//                      [--no-probe] [--probe-budget <secondes, 150 par défaut>] [--img-cache <fichier .json.gz>]
 import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ import { parseXmltv } from './xmltv.mjs';
 import { chanKey, groupChannels, mergeChannel, keepPast } from './merge.mjs';
 import { fetchEspn, fetchF1, buildSport, isSportBroadcast } from './sport.mjs';
 import { toXmltv } from './export.mjs';
+import { RatioCache, candidates, toProbe, pickImage, probeAll, urlRatio, WIDE } from './images.mjs';
 
 const args = process.argv.slice(2);
 const opt = (name, def) => {
@@ -23,6 +25,11 @@ const COUNTRIES = (opt('country', Object.keys(SOURCES).join(','))).split(',');
 const WITH_SPORT = !args.includes('--no-sport');
 const NOW = Date.now();
 const H = 3600_000;
+// images : sondage des formats inconnus (en-tête des fichiers), borné dans le temps ; cache gardé dans la branche data
+const PROBE = !args.includes('--no-probe');
+const PROBE_BUDGET_MS = Number(opt('probe-budget', '150')) * 1000;
+const IMG_CACHE_FILE = 'cache/images.json.gz';
+const imgCache = new RatioCache(NOW).load(opt('img-cache', PREV ? join(PREV, IMG_CACHE_FILE) : ''));
 
 const log = (...m) => console.log(new Date().toISOString().slice(11, 19), ...m);
 const write = (path, data) => {
@@ -32,21 +39,23 @@ const write = (path, data) => {
 };
 
 /** version courte d'un programme pour les listes (grille, « en cours ») */
-const short = (p) => ({ s: p.s, e: p.e, t: p.t, ...(p.st ? { st: p.st.slice(0, 90) } : {}), ...(p.i ? { i: p.i } : {}), ...(p.c ? { c: p.c[0] } : {}), ...(p.ep ? { ep: p.ep } : {}), ...(p.rerun ? { rerun: 1 } : {}) });
+const short = (p) => ({ s: p.s, e: p.e, t: p.t, ...(p.st ? { st: p.st.slice(0, 90) } : {}), ...(p.i ? { i: p.i } : {}), ...(p.ir ? { ir: p.ir } : {}), ...(p.c ? { c: p.c[0] } : {}), ...(p.ep ? { ep: p.ep } : {}), ...(p.rerun ? { rerun: 1 } : {}) });
 const full = (p) => {
-  const { ch: _ch, fill: _fill, ...rest } = p;
+  const { ch: _ch, fill: _fill, imgs: _imgs, ...rest } = p;
   return rest;
 };
 
 async function buildCountry(cc) {
   const report = { country: cc, sources: [], offsets: [] };
   const parsed = [];
+  const iconRatios = new Map();
   await pool(SOURCES[cc], 4, async (src) => {
     const t0 = Date.now();
     const entry = { code: src.code, name: src.name, note: src.note };
     try {
       const { text, url } = await fetchText(src.urls);
       const x = parseXmltv(text);
+      for (const [u, r] of x.iconRatios) iconRatios.set(u, r);
       const last = x.programmes.reduce((m, p) => Math.max(m, p.e), 0);
       const first = x.programmes.reduce((m, p) => Math.min(m, p.s), Infinity);
       Object.assign(entry, {
@@ -96,18 +105,24 @@ async function buildCountry(cc) {
     }
   }
 
-  const channels = [];
-  const nowFile = {};
-  const sportIndex = [];
-  let progCount = 0;
-  let imgCount = 0;
-  const xmltvChannels = [];
+  const mergedChannels = [];
   for (const g of groups) {
     const bySrc = lists.get(g);
     if (!bySrc) continue;
     const ordered = order.filter((c) => bySrc.has(c)).map((c) => ({ src: c, progs: bySrc.get(c) }));
     const { progs, primary, offsets } = mergeChannel(ordered, NOW);
     if (!progs.length) continue;
+    mergedChannels.push({ g, progs, primary, offsets });
+  }
+  report.images = await chooseImages(cc, mergedChannels, iconRatios);
+
+  const channels = [];
+  const nowFile = {};
+  const sportIndex = [];
+  let progCount = 0;
+  let imgCount = 0;
+  const xmltvChannels = [];
+  for (const { g, progs, primary, offsets } of mergedChannels) {
     for (const o of offsets) report.offsets.push({ ch: g.id, ...o });
     const file = `${cc}/ch/${safeId(g.id)}.json`;
     const isSport = progs.filter(isSportBroadcast).length >= 2 || /sport|bein|eurosport|equipe|rmc sport|dazn|golf|infosport|automoto/i.test(g.name);
@@ -155,6 +170,76 @@ async function buildCountry(cc) {
   return { report, sportIndex, keyToGroup };
 }
 
+/**
+ * Images horizontales (10/11/2026) : pour chaque programme, choisit parmi toutes les images proposées une image
+ * horizontale (≥ 1,6) quand il y en a une, sinon la plus large (src/images.mjs), et publie son format dans `ir`.
+ * Les formats inconnus sont sondés (début du fichier seulement), les programmes les plus proches d'abord, dans un délai
+ * borné ; le reste le sera aux générations suivantes grâce au cache.
+ */
+async function chooseImages(cc, mergedChannels, hints) {
+  const inNow = (p) => p.e > NOW - H && p.s < NOW + 9 * H;
+  const rank = (p) => (inNow(p) ? 0 : p.e > NOW && p.s < NOW + 48 * H ? 1 : p.e > NOW ? 2 : 3);
+  const all = [];
+  for (const { progs } of mergedChannels) {
+    for (const p of progs) {
+      if (!p.imgs && !p.i) continue;
+      all.push(p);
+      p._c = candidates(p.imgs || [p.i], hints);
+      p._old = p.i; // image de l'ancienne règle : première image de la source retenue
+    }
+  }
+  const oldRatio = (p) => hints.get(p._old) ?? urlRatio(p._old) ?? imgCache.get(p._old);
+  all.sort((a, b) => rank(a) - rank(b) || a.s - b.s);
+  // adresses à sonder, les plus utiles d'abord ; l'image d'avant est aussi sondée dans la fenêtre « en cours » (rapport)
+  const queue = new Set();
+  for (const p of all) {
+    for (const u of toProbe(p._c, imgCache)) queue.add(u);
+    if (inNow(p) && oldRatio(p) === undefined) queue.add(p._old);
+  }
+  let probe = { asked: queue.size, probed: 0, skipped: queue.size };
+  if (PROBE && queue.size) {
+    const t0 = Date.now();
+    probe = await probeAll([...queue], imgCache, { concurrency: 16, budgetMs: PROBE_BUDGET_MS, log: (m) => log(`[${cc}] ${m}`) });
+    probe.seconds = Math.round((Date.now() - t0) / 100) / 10;
+  }
+  const stat = () => ({ avecImage: 0, horizontales: 0, verticalesOuCarrees: 0, inconnues: 0 });
+  const before = { now: stat(), guide: stat() };
+  const after = { now: stat(), guide: stat() };
+  const count = (st, r) => {
+    st.avecImage++;
+    if (r === undefined || r === 0) st.inconnues++;
+    else if (r >= WIDE) st.horizontales++;
+    else st.verticalesOuCarrees++;
+  };
+  let changed = 0;
+  for (const p of all) {
+    const old = oldRatio(p);
+    const pick = pickImage(p._c, imgCache);
+    if (pick.i !== p._old) changed++;
+    p.i = pick.i;
+    if (pick.ir) p.ir = pick.ir;
+    else delete p.ir;
+    for (const [win, ok] of [['now', inNow(p)], ['guide', p.e > NOW]]) {
+      if (!ok) continue;
+      count(before[win], old);
+      count(after[win], p.ir);
+    }
+    delete p._c;
+    delete p._old;
+    delete p.imgs;
+  }
+  const pct = (st) => ({ ...st, pctHorizontales: st.avecImage ? Math.round((st.horizontales / st.avecImage) * 1000) / 10 : 0 });
+  const out = {
+    note: 'horizontale = largeur/hauteur ≥ 1,6 ; « now » = fenêtre de now.json, « guide » = programmes à venir ; inconnues = format pas encore sondé',
+    avant: { now: pct(before.now), guide: pct(before.guide) },
+    apres: { now: pct(after.now), guide: pct(after.guide) },
+    imagesChangees: changed,
+    sondage: probe,
+  };
+  log(`[${cc}] Images horizontales (now.json) : ${out.avant.now.pctHorizontales} % → ${out.apres.now.pctHorizontales} % ; guide à venir : ${out.avant.guide.pctHorizontales} % → ${out.apres.guide.pctHorizontales} % (${probe.probed ?? 0}/${probe.asked} sondées)`);
+  return out;
+}
+
 async function main() {
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
@@ -185,6 +270,7 @@ async function main() {
     log(`Sport : ${events.length} événements, ${withTv} avec une chaîne trouvée dans le guide (${espnVerified}/${espnTotal} matchs ESPN/F1 vérifiés)`);
   }
   const index = { generatedAt: NOW, generatedAtIso: new Date(NOW).toISOString(), countries: reports.map((r) => ({ country: r.country, channels: r.channels, programmes: r.programmes, imagePct: r.imagePct })), sport, files: { channels: '<pays>/channels.json', now: '<pays>/now.json', channel: '<pays>/ch/<id>.json', aliases: '<pays>/aliases.json', xmltv: '<pays>/xmltv.xml.gz', sport: 'sport/events.json', report: 'report.json' } };
+  write(IMG_CACHE_FILE, imgCache.toGzip());
   write('index.json', index);
   write('report.json', { generatedAt: NOW, countries: reports, sport });
   write('index.html', dashboard(index, reports));
@@ -198,7 +284,7 @@ function dashboard(index, reports) {
     .join('');
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Guide TV ouvert</title>
 <style>body{font:15px system-ui,sans-serif;margin:24px;color:#111;background:#fff}table{border-collapse:collapse;width:100%}td,th{padding:6px 8px;border-bottom:1px solid #ddd;text-align:left}@media(prefers-color-scheme:dark){body{background:#111;color:#eee}td,th{border-color:#333}}</style>
-<h1>Guide TV ouvert</h1><p>Généré le ${esc(index.generatedAtIso)} (UTC). ${index.countries.map((c) => `${esc(c.country)} : ${c.channels} chaînes, ${c.programmes} programmes, ${c.imagePct} % avec image`).join(' · ')}${index.sport ? ` · Sport : ${index.sport.events} événements, ${index.sport.avecChaine} avec une chaîne trouvée` : ''}</p>
+<h1>Guide TV ouvert</h1><p>Généré le ${esc(index.generatedAtIso)} (UTC). ${index.countries.map((c) => `${esc(c.country)} : ${c.channels} chaînes, ${c.programmes} programmes, ${c.imagePct} % avec image`).join(' · ')}${reports.map((r) => (r.images ? ` · Images horizontales (${esc(r.country)}, en cours) : ${r.images.apres.now.pctHorizontales} %` : '')).join('')}${index.sport ? ` · Sport : ${index.sport.events} événements, ${index.sport.avecChaine} avec une chaîne trouvée` : ''}</p>
 <table><tr><th>Pays</th><th>Source</th><th>État</th><th>Chaînes</th><th>Programmes</th><th>Images</th><th>Jusqu'au</th></tr>${rows}</table>
 <p>Fichiers : <a href="index.json">index.json</a> · <a href="fr/channels.json">fr/channels.json</a> · <a href="fr/now.json">fr/now.json</a> · <a href="sport/events.json">sport/events.json</a> · <a href="report.json">report.json</a></p>`;
 }

@@ -16,12 +16,20 @@ Le tableau de bord est `index.html` de cette branche.
 3. **Fusionne** chaîne par chaîne : la source qui couvre le mieux les 48 h à venir sert de base, les autres comblent
    les trous et complètent les champs manquants (image, description, épisode). Une source décalée d'un nombre
    d'heures entier sur une chaîne (erreur de fuseau ou de changement d'heure) est mise de côté pour cette chaîne.
-4. **Sport** : récupère les matchs (ESPN pour le foot européen, NBA, NFL, NHL, MLB ; Jolpica pour la F1), puis les
+4. **Images horizontales** (`src/images.mjs`) : les cartes de l'app sont en 16:9. Pour chaque programme, toutes les
+   images proposées (jusqu'à 4 par programme chez epgshare01, plus celles des autres sources au même créneau) sont
+   comparées et une image **horizontale** (largeur / hauteur ≥ 1,6) est retenue en priorité, sinon la plus large. Le format
+   se lit dans l'adresse quand elle l'impose (Canal+ et Programme TV `640x360`, Oqee `wide_generic`, Télérama…), sinon
+   dans l'en-tête du fichier (requête Range de 32 Ko, JPEG, PNG, WebP, GIF), 16 à la fois, 150 s au plus par génération,
+   les programmes les plus proches d'abord ; un cache (`cache/images.json.gz` de la branche `data`) évite de sonder deux
+   fois la même image. Télérama est redemandé en `1280x720` ; Pluto : `featuredImage` 16:9 de la série quand elle existe,
+   sinon l'affiche carrée en 1280×720 sur fond flou. En cas d'échec, l'image d'origine est gardée.
+5. **Sport** : récupère les matchs (ESPN pour le foot européen, NBA, NFL, NHL, MLB ; Jolpica pour la F1), puis les
    **croise avec le guide**. Une chaîne n'est « confirmée » que si elle a vraiment le match au programme à cette heure-là :
    les diffuseurs annoncés par ESPN (souvent américains, « Paramount+ ») restent à part, marqués non vérifiés.
    Les retransmissions que seul le guide connaît (rugby, handball, tennis, cyclisme…) sont ajoutées et regroupées
    quand plusieurs chaînes ont le même match. Les rediffusions sont rattachées au match d'origine.
-5. Publie les fichiers ci-dessous. Si le guide est anormalement petit (sources en panne), rien n'est publié et la
+6. Publie les fichiers ci-dessous. Si le guide est anormalement petit (sources en panne), rien n'est publié et la
    version précédente reste en ligne.
 
 ## Fichiers publiés
@@ -38,10 +46,12 @@ L'en-tête HTTP `Date` des réponses permet de corriger une horloge d'appareil f
 | `fr/ch/<id>.json` | Tous les programmes d'une chaîne (environ 10 jours) |
 | `fr/xmltv.xml.gz` | Le guide fusionné au format XMLTV (Kodi, TiviMate, Plex…) |
 | `sport/events.json` | Matchs en cours et à venir, avec les chaînes qui les diffusent vraiment |
-| `report.json` | État de chaque source, décalages détectés, chiffres du sport |
+| `report.json` | État de chaque source, décalages détectés, chiffres du sport, part d'images horizontales avant/après (`images`) |
+| `cache/images.json.gz` | Format des images déjà sondées (adresse → largeur/hauteur), relu à la génération suivante |
 
 Programme : `s` début, `e` fin, `t` titre, `st` sous-titre, `d` description, `i` image, `c` catégories,
-`ep` `{ season, episode }`, `r` classification, `rerun` rediffusion, `src` source retenue, `n` nombre de sources d'accord.
+`ep` `{ season, episode }`, `ir` format de l'image `i` (largeur / hauteur, 2 décimales, ex. 1.78 ; absent si
+inconnu : l'app peut choisir son cadrage sans attendre le chargement), `r` classification, `rerun` rediffusion, `src` source retenue, `n` nombre de sources d'accord.
 
 Événement sportif : `sport`, `competition`, `name`, `start`, `home` / `away` (nom, logo, score), `tv` (chaînes
 trouvées dans le guide, `niveau` = `confirmé` si les deux équipes sont dans le titre, `probable` si seulement dans la
@@ -81,6 +91,8 @@ les 4 autres sont des chaînes arrêtées ou renommées (C8, NRJ 12, OCS Max, Ga
 ```bash
 node --test test/*.test.mjs
 node src/build.mjs --out dist
+# options : --prev <génération précédente> (historique et cache d'images), --no-sport, --no-probe (images : cache seul),
+#           --probe-budget <secondes> (150 par défaut), --img-cache <fichier .json.gz>
 ```
 
 Node 20 ou plus, aucune dépendance.

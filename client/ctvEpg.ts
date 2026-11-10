@@ -23,7 +23,8 @@ export type Programme = {
   t: string; // titre
   st?: string; // sous-titre
   d?: string; // description (fichier de chaîne seulement)
-  i?: string; // image 16:9
+  i?: string; // image, horizontale (16:9) chaque fois qu'une source en propose une
+  ir?: number; // format de l'image : largeur / hauteur (1.78 = 16:9, 0.75 = affiche 3:4), absent si inconnu
   c?: string | string[]; // catégorie (première dans « en cours », toutes dans le fichier de chaîne)
   ep?: { season?: number; episode?: number };
   r?: string; // classification (CSA…)
